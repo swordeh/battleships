@@ -2,7 +2,6 @@ package game
 
 import (
 	"bufio"
-	"log"
 	"net"
 	"strings"
 )
@@ -19,7 +18,6 @@ func (c *Connection) Listen(ch chan string, disconnectChannel chan *Connection) 
 	for {
 		message, err := reader.ReadString('\n')
 		if err != nil {
-			log.Println("Connection error / close")
 			connection.Close()
 			disconnectChannel <- c
 			return
