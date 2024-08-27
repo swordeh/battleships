@@ -27,22 +27,17 @@ func NewServer() *Server {
 
 func (s *Server) HandleConnection(conn *net.Conn) {
 	// Create a Connection object which stores a pointer reference to the net.conn made
-	c := Connection{
+	c := &Connection{
 		Conn:   conn,
 		Status: 1,
 	}
-
 	log.Println("New connection from", (*conn).RemoteAddr())
-
 	// Create a Player
-	p := NewPlayer(&c)
-
+	p := NewPlayer(c)
 	// Add the Player to the Player pool
 	s.AddPlayer(p)
-
 	// Send the Message of the day
 	s.SendMotd(p)
-
 	// Handle commands
 	go s.HandleCommands(p)
 
@@ -53,18 +48,6 @@ func (s *Server) HandleConnection(conn *net.Conn) {
 // TODO: Add lock
 func (s *Server) AddConnection(conn *Connection) {
 	s.Connections = append(s.Connections, conn)
-}
-
-// RemovePlayer removes a player from the server's list of players.
-// The player is removed from the server's Players slice.
-func (s *Server) RemovePlayerByConnection(c *Connection) {
-	for i, player := range s.Players {
-		if player.Connection.Conn == c.Conn {
-			player.Connection.Status = 0
-			s.Players = append(s.Players[:i], s.Players[i+1:]...)
-			break
-		}
-	}
 }
 
 func (s *Server) AddPlayer(p *Player) {
@@ -108,45 +91,22 @@ func (s *Server) MatchMaker() {
 
 		select {
 		case p := <-s.PlayerQueue:
-			log.Println("MATCHMAKER player already in game, ignore")
 			match := waitingMatches[0]
 
 			// make sure that player has not tried to join again
 			if !p.InGame {
 				match.AddPlayer(p)
-				p.InGame = true
+				p.SetInGameStatus(true)
 			}
 
 			if len(match.Players) == 2 {
 				match.Start()
 			}
-		case c := <-s.ConnectionEvent:
-			// This event will trigger when a connection is disconnected, but it's not the concern of the matchmaker
-			// to handle anything other than the match making process. If they are in a match, this code will not
-			// remove players from those matches, only those that are in the WAITING state
+		case <-s.ConnectionEvent:
 			log.Println("MATCHMAKER: player dc")
-			for _, match := range waitingMatches {
-				for _, player := range match.Players {
-					if player.Connection == c {
-						log.Println("MATCHMAKER: dc'd player was in a match and has been removed ")
-						match.RemovePlayer(player)
-					}
-				}
-			}
 		}
 	}
 }
-
-//func (s *Server) PairPlayers(p1, p2 *Player) error {
-//
-//	log.Println("pairing players")
-//	p1.InGame = true
-//	p2.InGame = true
-//	m := NewMatch(p1, p2)
-//	s.Matches = append(s.Matches, m)
-//	s.StartGame(m)
-//	return nil
-//}
 
 func (s *Server) HandleCommands(p *Player) {
 	// Set up channels for either a command or connection status update (disconnect)
@@ -167,11 +127,10 @@ func (s *Server) HandleCommands(p *Player) {
 			default:
 				log.Println("Unknown command:", cmd)
 			}
-		case c := <-dcChan:
+		case <-dcChan:
 			// Disconnection
 			log.Println("Server handing disconnection")
-			s.RemovePlayerByConnection(c)
-			s.ConnectionEvent <- c
+			s.HandleDisconnection(p)
 		}
 	}
 }
@@ -185,21 +144,32 @@ func (s *Server) SendMotd(p *Player) {
 	p.Connection.Send(string(motd))
 }
 
-func (s *Server) CheckConnection(m *Match) {
-	for _, player := range m.Players {
-		if player.Connection.Status == 0 {
-			// Player disconnected
-			s.RemovePlayerByConnection(player.Connection)
-			m.Cancel()
+// HandleDisconnection will run when a player disconnects from the server.
+// If the player is currently in game, HandleDisconnection will first cancel their match.
+// It will then remove the player from the server's list of players, then send the player's *Connection to
+// the server's ConnectionEvent channel.
+func (s *Server) HandleDisconnection(p *Player) {
+	if p.InGame == true {
+		// Search for a player in the match and cancel
+		for _, match := range s.Matches {
+			for _, player := range match.Players {
+				if player == p {
+					match.RemovePlayer(p)
+				}
+			}
 		}
 	}
+	s.RemovePlayer(p)
+	s.ConnectionEvent <- p.Connection
 }
 
-func (s *Server) GetPlayerByConnection(c *Connection) *Player {
-	for _, player := range s.Players {
-		if player.Connection == c {
-			return player
+func (s *Server) RemovePlayer(p *Player) {
+	for i, player := range s.Players {
+		log.Println("player removed from server")
+		if p == player {
+			s.Players = append(s.Players[:i], s.Players[i+1:]...)
+			break
+
 		}
 	}
-	return nil
 }
