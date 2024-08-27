@@ -15,3 +15,7 @@ func NewPlayer(conn *Connection) *Player {
 	}
 	return &p
 }
+
+func (p *Player) SetInGameStatus(status bool) {
+	p.InGame = status
+}
